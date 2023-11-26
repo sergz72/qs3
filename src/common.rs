@@ -1,31 +1,28 @@
 /*
 
-Client message structure:
-|RSA part length - 2 bytes|AES key encrypted with RSA|AES gcm nonce - 12 bytes|Request encrypted with AES-GCM|
+Client message structure (RSA encoded, maximum request data length ~ 430 bytes for RSA 4096):
+|AES key - 32 bytes|Request data|sha256 of request data - 32 bytes|
+
+Request data for S3:
+|operation id (GET/PUT) - 1 byte|file name length - 1 byte|file name|password - 48 bytes|
 
 Server message structure:
-|AES gcm nonce - 12 bytes|Response encrypted with AES-GCM|
+|AES gcm nonce - 12 bytes|Response + sha256 of response data encrypted with AES-GCM|
 
-Network packet structure (hmac key = sha256 of RSA public key file):
-|packet number - 2 byte|total number of packets - 2 byte|data - maximum 1418 bytes|hmac sha256 of packet data - 32 byte|
-
-Retry packet structure:
-|packet number - 2 byte|hmac sha256 of packet data - 32 byte|
+Response data for S3:
+|S3 presigned URL|
 
 */
 
 use std::fs;
 use std::io::{Error, ErrorKind};
-use aes_gcm::aead::Aead;
-use aes_gcm::Aes256Gcm;
 use pkcs8::DecodePrivateKey;
 use rsa::RsaPrivateKey;
+use sha2::{Sha256, Digest};
 
-pub const MAX_DATA_LENGTH: usize = 1418;
-pub const MAX_PACKET_SIZE: usize = 1454;
-pub const BUFFER_SIZE: usize = MAX_PACKET_SIZE + 1;
+pub const MAX_PACKET_LENGTH: usize = 65535;
 
-/*fn check_hash(decoded: Vec<u8>) -> Result<Vec<u8>, Error> {
+pub fn check_hash(decoded: &[u8]) -> Result<&[u8], Error> {
     if decoded.len() < 32 {
         return Err(Error::new(ErrorKind::InvalidData, "check_hash: too short data"));
     }
@@ -41,13 +38,14 @@ pub const BUFFER_SIZE: usize = MAX_PACKET_SIZE + 1;
             "data hash does not match",
         ));
     }
-    Ok(d.to_vec())
-}*/
+    Ok(d)
+}
 
-pub fn common_decrypt(response: Vec<u8>, cipher: &Aes256Gcm) -> Result<Vec<u8>, Error> {
-    let nonce = aes_gcm::Nonce::from_slice(&response[0..12]);
-    cipher.decrypt(nonce, &response[12..])
-        .map_err(|e| Error::new(ErrorKind::InvalidData, e.to_string()))
+pub fn add_hash(data: &mut Vec<u8>) {
+    let mut hasher = Sha256::new();
+    hasher.update(&data);
+    let hash = hasher.finalize();
+    data.extend_from_slice(hash.as_slice());
 }
 
 pub fn build_private_key(private_key: &str) -> Result<RsaPrivateKey, Error> {
@@ -66,8 +64,8 @@ mod tests {
     use rand::Rng;
     use rand::rngs::ThreadRng;
     use rsa::RsaPrivateKey;
-    use crate::client::client_encrypt;
-    use crate::common::{build_private_key, common_decrypt, load_key_file};
+    use crate::client::{client_decrypt, client_encrypt};
+    use crate::common::{build_private_key, load_key_file};
     use crate::server::packet_handler;
 
     #[test]
@@ -79,22 +77,25 @@ mod tests {
         let src_data: Vec<u8> = (0..100).map(|_| rng.gen()).collect();
         test_encryption_data(pk, &private_key, src_data, &mut rng)?;
 
-        let src_data: Vec<u8> = (0..20000).map(|_| rng.gen()).collect();
+        let src_data: Vec<u8> = (0..200).map(|_| rng.gen()).collect();
         test_encryption_data(pk, &private_key, src_data, &mut rng)?;
 
-        let src_data: Vec<u8> = (0..200000).map(|_| rng.gen()).collect();
+        let src_data: Vec<u8> = (0..300).map(|_| rng.gen()).collect();
+        test_encryption_data(pk, &private_key, src_data, &mut rng)?;
+
+        let src_data: Vec<u8> = (0..430).map(|_| rng.gen()).collect();
         test_encryption_data(pk, &private_key, src_data, &mut rng)
     }
 
     fn test_encryption_data(public_key: &str, private_key: &RsaPrivateKey, src_data: Vec<u8>,
                             rng: &mut ThreadRng) -> Result<(), Error> {
-        let (encrypted, cipher) = client_encrypt(public_key, src_data.clone())?;
+        let (encrypted, aes_key) = client_encrypt(public_key, src_data.clone())?;
         let response = packet_handler(&private_key, encrypted.as_slice(),
                                       |in_data| {
-                                          Ok(Some(in_data))
+                                          Ok(Some(in_data.to_vec()))
                                       }, rng)?;
         assert!(response.is_some());
-        let decrypted = common_decrypt(response.unwrap(), &cipher)?;
+        let decrypted = client_decrypt(response.unwrap().as_slice(), aes_key)?;
         assert_eq!(decrypted, src_data);
         Ok(())
     }

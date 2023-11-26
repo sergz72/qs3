@@ -1,13 +1,12 @@
 use std::io::{Error, ErrorKind};
 use std::net::{ToSocketAddrs, UdpSocket};
-use aes_gcm::{AeadCore, Aes256Gcm, KeyInit};
+use aes_gcm::{Aes256Gcm, KeyInit};
 use aes_gcm::aead::Aead;
 use pkcs8::DecodePublicKey;
 use rand::RngCore;
 use rand::rngs::OsRng;
 use rsa::{Pkcs1v15Encrypt, RsaPublicKey};
-use sha2::{Sha256, Digest};
-use crate::common::common_decrypt;
+use crate::common::{add_hash, check_hash};
 use crate::network::qsend_to;
 
 pub fn qsend(
@@ -21,43 +20,45 @@ pub fn qsend(
         .to_socket_addrs()?
         .next()
         .ok_or(Error::new(ErrorKind::Unsupported, "invalid address"))?;
-    let (encrypted, cipher) = client_encrypt(server_public_key, data)?;
+    let (encrypted, aes_key) = client_encrypt(server_public_key, data)?;
     let socket = UdpSocket::bind((addr.ip(), 0))?;
     let response = qsend_to(socket, addr, encrypted, read_timeout, retries)?;
-    common_decrypt(response, &cipher)
+    client_decrypt(response.as_slice(), aes_key)
+}
+
+pub fn client_decrypt(response: &[u8], aes_key: [u8; 32]) -> Result<Vec<u8>, Error> {
+    if response.len() < 12 + 16 + 32 {
+        return Err(Error::new(ErrorKind::InvalidData, "client_decrypt: too short response"));
+    }
+    let nonce = aes_gcm::Nonce::from_slice(&response[0..12]);
+    let cipher = Aes256Gcm::new(&aes_key.into());
+    let decrypted = cipher.decrypt(nonce, &response[12..])
+        .map_err(|e| Error::new(ErrorKind::InvalidData, e.to_string()))?;
+    let without_hash = check_hash(decrypted.as_slice())?;
+    Ok(without_hash.to_vec())
 }
 
 pub fn client_encrypt(
     server_public_key: &str,
-    mut data: Vec<u8>,
-) -> Result<(Vec<u8>, Aes256Gcm), Error> {
+    request: Vec<u8>,
+) -> Result<(Vec<u8>, [u8; 32]), Error> {
     let key = RsaPublicKey::from_public_key_pem(server_public_key)
         .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))?;
 
     // random 32 byte AES key
     let mut aes_key = [0u8; 32];
     OsRng.fill_bytes(&mut aes_key);
-    let mut rng = rand::thread_rng();
-    let rsa_encrypted = key.encrypt(&mut rng, Pkcs1v15Encrypt, &aes_key)
-        .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))?;
+    let mut data = aes_key.to_vec();
+
+    // adding request
+    data.extend_from_slice(&request);
 
     // adding sha256 hash
-    let mut hasher = Sha256::new();
-    hasher.update(&data);
-    let hash = hasher.finalize();
-    data.extend_from_slice(hash.as_slice());
+    add_hash(&mut data);
 
-    let cipher = Aes256Gcm::new(&aes_key.into());
-    let nonce = Aes256Gcm::generate_nonce(rng);
+    let mut rng = rand::thread_rng();
+    let rsa_encrypted = key.encrypt(&mut rng, Pkcs1v15Encrypt, &data)
+        .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))?;
 
-    let aes_encrypted = cipher
-        .encrypt(&nonce, data.as_slice())
-        .map_err(|e| Error::new(ErrorKind::InvalidData, e.to_string()))?;
-
-    let mut result = (rsa_encrypted.len() as u16).to_le_bytes().to_vec();
-    result.extend_from_slice(&rsa_encrypted);
-    result.extend_from_slice(nonce.as_slice());
-    result.extend_from_slice(&aes_encrypted);
-
-    Ok((result, cipher))
+    Ok((rsa_encrypted, aes_key))
 }

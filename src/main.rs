@@ -43,7 +43,7 @@ fn start_server(port: String) -> Result<(), Error> {
         .map_err(|e:  ParseIntError|Error::new(ErrorKind::InvalidData, e.to_string()))?;
     qserver(load_key_file("test_data/test_rsa.pem")?.as_str(), port,
             |in_data| {
-                Ok(Some(in_data))
+                Ok(Some(in_data.to_vec()))
             })
 }
 
