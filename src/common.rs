@@ -1,13 +1,13 @@
 /*
 
 Client message structure (RSA encoded, maximum request data length ~ 430 bytes for RSA 4096):
-|AES key - 32 bytes|Request data|sha256 of request data - 32 bytes|
+|AES key - 32 bytes|AES gcm nonce - 12 bytes|Request data|sha256 of request data - 32 bytes|
 
 Request data for S3:
-|operation id (GET/PUT) - 1 byte|file name length - 1 byte|file name|password - 48 bytes|
+|operation id (GET/PUT) - 1 byte|file name length - 1 byte|file name|s3 password length - 1 byte|s3 password|
 
 Server message structure:
-|AES gcm nonce - 12 bytes|Response + sha256 of response data encrypted with AES-GCM|
+|Response + sha256 of response data encrypted with AES-GCM|
 
 Response data for S3:
 |S3 presigned URL|
@@ -62,7 +62,6 @@ pub fn load_key_file(file_name: &str) -> Result<String, Error> {
 mod tests {
     use std::io::Error;
     use rand::Rng;
-    use rand::rngs::ThreadRng;
     use rsa::RsaPrivateKey;
     use crate::client::{client_decrypt, client_encrypt};
     use crate::common::{build_private_key, load_key_file};
@@ -75,27 +74,28 @@ mod tests {
         let pk = public_key.as_str();
 
         let src_data: Vec<u8> = (0..100).map(|_| rng.gen()).collect();
-        test_encryption_data(pk, &private_key, src_data, &mut rng)?;
+        test_encryption_data(pk, &private_key, src_data)?;
 
         let src_data: Vec<u8> = (0..200).map(|_| rng.gen()).collect();
-        test_encryption_data(pk, &private_key, src_data, &mut rng)?;
+        test_encryption_data(pk, &private_key, src_data)?;
 
         let src_data: Vec<u8> = (0..300).map(|_| rng.gen()).collect();
-        test_encryption_data(pk, &private_key, src_data, &mut rng)?;
+        test_encryption_data(pk, &private_key, src_data)?;
 
-        let src_data: Vec<u8> = (0..430).map(|_| rng.gen()).collect();
-        test_encryption_data(pk, &private_key, src_data, &mut rng)
+        let src_data: Vec<u8> = (0..420).map(|_| rng.gen()).collect();
+        test_encryption_data(pk, &private_key, src_data)
     }
 
-    fn test_encryption_data(public_key: &str, private_key: &RsaPrivateKey, src_data: Vec<u8>,
-                            rng: &mut ThreadRng) -> Result<(), Error> {
-        let (encrypted, aes_key) = client_encrypt(public_key, src_data.clone())?;
+    fn test_encryption_data(public_key: &str, private_key: &RsaPrivateKey, src_data: Vec<u8>)
+        -> Result<(), Error> {
+        let (encrypted, aes_key, nonce) =
+            client_encrypt(public_key, src_data.clone())?;
         let response = packet_handler(&private_key, encrypted.as_slice(),
                                       |in_data| {
                                           Ok(Some(in_data.to_vec()))
-                                      }, rng)?;
+                                      })?;
         assert!(response.is_some());
-        let decrypted = client_decrypt(response.unwrap().as_slice(), aes_key)?;
+        let decrypted = client_decrypt(response.unwrap().as_slice(), aes_key, nonce)?;
         assert_eq!(decrypted, src_data);
         Ok(())
     }

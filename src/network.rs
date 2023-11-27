@@ -35,13 +35,12 @@ pub fn qserver(
     socket.set_nonblocking(true)?;
     println!("UDP server started on port {}", port);
     let mut buf = [0; MAX_PACKET_LENGTH];
-    let mut rng = rand::thread_rng();
     let ms20 = Duration::from_millis(20);
     loop {
         match socket.recv_from(&mut buf) {
             Ok((n, src)) => {
                 println!("Incoming packet with size {} from {}", n, src);
-                let data_to_send = packet_handler(&key, &buf[0..n], handler, &mut rng)?;
+                let data_to_send = packet_handler(&key, &buf[0..n], handler)?;
                 if let Some(data) = data_to_send {
                     if let Err(e) = socket.send_to(data.as_slice(),src) {
                         println!("send error {}", e.to_string());
