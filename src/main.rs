@@ -2,14 +2,9 @@ use std::env::args;
 use std::fs;
 use std::io::{Error, ErrorKind};
 use std::num::ParseIntError;
-use crate::client::qsend;
-use crate::common::load_key_file;
-use crate::network::qserver;
-
-mod client;
-mod server;
-mod common;
-mod network;
+use qs3_lib::client::qsend;
+use qs3_lib::load_key_file;
+use qs3_lib::network::qserver;
 
 fn usage() -> Result<(), Error> {
     println!("Usage: qs3 server port|client host:port file_name");
