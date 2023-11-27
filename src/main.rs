@@ -36,7 +36,7 @@ fn main() -> Result<(), Error> {
 fn start_server(port: String) -> Result<(), Error> {
     let port: u16 = port.parse()
         .map_err(|e:  ParseIntError|Error::new(ErrorKind::InvalidData, e.to_string()))?;
-    qserver(load_key_file("test_data/test_rsa.pem")?.as_str(), port,
+    qserver(load_key_file("../qs3_lib/test_data/test_rsa.pem")?.as_str(), port,
             |in_data| {
                 Ok(Some(in_data.to_vec()))
             })
@@ -44,7 +44,7 @@ fn start_server(port: String) -> Result<(), Error> {
 
 fn send_file_to_server(arguments: Vec<String>) -> Result<(), Error> {
     let data = fs::read(&arguments[2])?;
-    let response = qsend(load_key_file("test_data/test_rsa.pem.pub")?.as_str(),
+    let response = qsend(load_key_file("../qs3_lib/test_data/test_rsa.pem.pub")?.as_str(),
           &arguments[1], data.clone(), 2, 3)?;
     if data != response {
         println!("wrong data received");
