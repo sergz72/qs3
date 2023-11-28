@@ -78,7 +78,7 @@ fn usage() -> Result<(), Error> {
 fn main() -> Result<(), Error> {
     let arguments: Vec<String> = args().skip(1).collect();
     let l = arguments.len();
-    if l != 4 || l != 5 {
+    if l != 4 && l != 5 {
         return usage();
     }
 
