@@ -5,7 +5,7 @@ use std::num::ParseIntError;
 use qs3_lib::client::ServerConfig;
 use qs3_lib::load_key_file;
 use qs3_lib::network::{QHandler, qserver};
-use s3cli_lib::{build_key_info, KeyInfo, S3KeyInfo};
+use s3cli_lib::{build_key_info, build_key_parameters, KeyInfo, S3KeyInfo};
 
 /*
 
@@ -34,7 +34,7 @@ struct ServerHandler {
 impl QHandler for ServerHandler {
     fn handle(&self, data: &[u8]) -> Result<Option<Vec<u8>>, Error> {
         let decoded = decode_data(data)?;
-        let new_key_info = S3KeyInfo::new_from_key_info(&self.key_info, decoded.s3_secret, None)?;
+        let new_key_info = S3KeyInfo::new_from_key_info(&self.key_info, decoded.s3_secret)?;
         let now = chrono::Utc::now();
         let url = new_key_info.build_presigned_url(decoded.method.as_str(), now, &decoded.file_name, 60)?;
         Ok(Some(url.as_bytes().to_vec()))
@@ -74,7 +74,7 @@ fn start_server(rsa_key: String, port: &String, s3_key_file_name: &String) -> Re
     let port: u16 = port.parse()
         .map_err(|e:  ParseIntError|Error::new(ErrorKind::InvalidData, e.to_string()))?;
     let data = fs::read(s3_key_file_name)?;
-    let key_info = build_key_info(data)?;
+    let key_info = build_key_info(&build_key_parameters(data)?)?;
     let handler = Box::new(ServerHandler{ key_info });
     qserver(rsa_key.as_str(), port, handler)
 }
