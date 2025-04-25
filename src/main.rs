@@ -34,7 +34,7 @@ struct ServerHandler {
 impl QHandler for ServerHandler {
     fn handle(&self, data: &[u8]) -> Result<Option<Vec<u8>>, Error> {
         let decoded = decode_data(data)?;
-        let new_key_info = S3KeyInfo::new_from_key_info(&self.key_info, decoded.s3_secret)?;
+        let new_key_info = S3KeyInfo::new_from_key_info(&self.key_info, decoded.s3_secret, None)?;
         let now = chrono::Utc::now();
         let url = new_key_info.build_presigned_url(decoded.method.as_str(), now, &decoded.file_name, 60)?;
         Ok(Some(url.as_bytes().to_vec()))
