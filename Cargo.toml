@@ -6,4 +6,4 @@ edition = "2021"
 [dependencies]
 qs3_lib = { path = "../qs3_lib" }
 s3cli_lib = { path = "../s3cli_lib" }
-chrono = "0.4.31"
+chrono = "0.4.40"
